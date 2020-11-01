@@ -13,6 +13,12 @@ A simple command line tool for dumping a source file using the Clang Index
 Library.
 """
 
+import clang
+import os
+from clang.cindex import Index
+from pprint import pprint
+
+
 def get_diag_info(diag):
     return { 'severity' : diag.severity,
              'location' : diag.location,
@@ -36,13 +42,18 @@ def get_cursor_id(cursor, cursor_list = []):
     return len(cursor_list) - 1
 
 def get_info(node, depth=0):
-    if opts.maxDepth is not None and depth >= opts.maxDepth:
-        children = None
-    else:
-        children = [get_info(c, depth+1)
-                    for c in node.get_children()]
+    # if opts.maxDepth is not None and depth >= opts.maxDepth:
+    #     children = None
+    # else:
+    children = [get_info(c, depth+1)
+                for c in node.get_children()]
+
+
+    tokens = str(map(lambda x : x.spelling, node.get_tokens()))
+
     return { 'id' : get_cursor_id(node),
              'kind' : node.kind,
+             'tokens' : tokens,
              'usr' : node.get_usr(),
              'spelling' : node.spelling,
              'location' : node.location,
@@ -50,11 +61,10 @@ def get_info(node, depth=0):
              'extent.end' : node.extent.end,
              'is_definition' : node.is_definition(),
              'definition id' : get_cursor_id(node.get_definition()),
+             'len(children)' : len(children),
              'children' : children }
 
 def main():
-    from clang.cindex import Index
-    from pprint import pprint
 
     from optparse import OptionParser, OptionGroup
 
@@ -73,12 +83,16 @@ def main():
     if len(args) == 0:
         parser.error('invalid number arguments')
 
+    
+    clang.cindex.conf.set_library_path(os.environ['CLANG_LIBRARY_PATH'])
+
     index = Index.create()
+    args.append('-std=c++11')
     tu = index.parse(None, args)
     if not tu:
         parser.error("unable to load input")
 
-    pprint(('diags', [get_diag_info(d) for d in  tu.diagnostics]))
+    #pprint(('diags', [get_diag_info(d) for d in  tu.diagnostics]))
     pprint(('nodes', get_info(tu.cursor)))
 
 if __name__ == '__main__':
