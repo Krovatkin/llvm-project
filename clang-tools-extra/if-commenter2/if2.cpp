@@ -8,10 +8,12 @@
 // Eli Bendersky (eliben@gmail.com)
 // This code is in the public domain
 //------------------------------------------------------------------------------
+#include <iostream>
 #include <string>
 
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
+#include "clang/AST/Expr.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -19,6 +21,7 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
+#include "clang/Tooling/Transformer/RangeSelector.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
@@ -27,6 +30,25 @@ using namespace clang::driver;
 using namespace clang::tooling;
 
 static llvm::cl::OptionCategory MatcherSampleCategory("Matcher Sample");
+
+//
+
+class PrintfStmtHandler : public MatchFinder::MatchCallback {
+public:
+  PrintfStmtHandler(Rewriter &Rewrite) : Rewrite(Rewrite) {}
+
+  virtual void run(const MatchFinder::MatchResult &Result) {
+    // The matched 'if' statement was bound to 'ifStmt'.
+    if (const StringLiteral *strLiteral =
+            Result.Nodes.getNodeAs<clang::StringLiteral>("str")) {
+      std::cerr << "literal string is " << strLiteral->getString().str() << std::endl;
+      Rewrite.ReplaceText(strLiteral->getSourceRange(), "replaced str %i");
+    }
+  }
+
+private:
+  Rewriter &Rewrite;
+};
 
 class IfStmtHandler : public MatchFinder::MatchCallback {
 public:
@@ -67,9 +89,13 @@ private:
 // the AST.
 class MyASTConsumer : public ASTConsumer {
 public:
-  MyASTConsumer(Rewriter &R) : HandlerForIf(R), HandlerForFor(R) {
+  MyASTConsumer(Rewriter &R) : HandlerForIf(R), HandlerForFor(R), HandlerForPrintf(R) {
     // Add a simple matcher for finding 'if' statements.
     Matcher.addMatcher(ifStmt().bind("ifStmt"), &HandlerForIf);
+
+    Matcher.addMatcher(callExpr(callee(functionDecl(hasName("printf"))),
+                                hasArgument(0, stringLiteral().bind("str"))),
+                       &HandlerForPrintf);
 
     // Add a complex matcher for finding 'for' loops with an initializer set
     // to 0, < comparison in the codition and an increment. For example:
@@ -99,6 +125,7 @@ public:
 
 private:
   IfStmtHandler HandlerForIf;
+  PrintfStmtHandler HandlerForPrintf;
   IncrementForLoopHandler HandlerForFor;
   MatchFinder Matcher;
 };
@@ -128,4 +155,3 @@ int main(int argc, const char **argv) {
 
   return Tool.run(newFrontendActionFactory<MyFrontendAction>().get());
 }
-
